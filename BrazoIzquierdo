@@ -1,0 +1,36 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class BrazoIzquierdo : MonoBehaviour
+{
+    public Animator animator;
+    public Vector3 hombroIzquierdo;    
+    public Vector3 codoIzquierdo;      
+    public Vector3 muñecaIzquierda;    
+    public Vector3 centroCuerpo;             
+    private Transform t_hombroIzq;
+    private Transform t_codoIzq;
+    private Transform t_muñecaIzq;
+    private Transform t_centro;
+
+    void Start()
+    {
+        t_hombroIzq  = animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
+        t_codoIzq    = animator.GetBoneTransform(HumanBodyBones.LeftLowerArm);
+        t_muñecaIzq  = animator.GetBoneTransform(HumanBodyBones.LeftHand);
+        t_centro     = animator.GetBoneTransform(HumanBodyBones.UpperChest);
+    }
+
+    void Update()
+    {
+        if (t_hombroIzq != null)  hombroIzquierdo = t_hombroIzq.position;
+        if (t_codoIzq != null)    codoIzquierdo   = t_codoIzq.position;
+        if (t_muñecaIzq != null)  muñecaIzquierda = t_muñecaIzq.position;
+        if (t_centro != null)     centroCuerpo    = t_centro.position;
+    }
+    public Vector3 GetHombroIzquierdo()  => hombroIzquierdo;  
+    public Vector3 GetCodoIzquierdo()    => codoIzquierdo;    
+    public Vector3 GetMuñecaIzquierda()  => muñecaIzquierda;  
+    public Vector3 GetCentroHombros()    => centroCuerpo;     
+}

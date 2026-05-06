@@ -1,0 +1,43 @@
+using UnityEngine;
+
+public class HandIzquierdo : MonoBehaviour
+{
+    [Header("Referencia de la mano")]
+    public Transform HandColliderLeft;
+
+    [Header("Referencia del tronco / cuerpo")]
+    public Transform referenciaTronco;
+
+    [Header("Esferas")]
+    public Transform esferaMano;
+    public Transform esferaSoloEjeY;
+
+    [Header("Ajustes visuales")]
+    public float offsetZ = 0f;
+    public float offsetY = 0f;
+
+    void LateUpdate()
+    {
+        if (HandColliderLeft == null || referenciaTronco == null)
+        {
+            return;
+        }
+
+        // 1. La esfera de la mano copia directamente la posición de la mano
+        if (esferaMano != null)
+        {
+            esferaMano.position = HandColliderLeft.position;
+        }
+
+        // 2. La esfera del eje Y usa la altura de la esferaMano
+        // pero mantiene X y Z del tronco/cuerpo
+        if (esferaSoloEjeY != null && esferaMano != null)
+        {
+            float x = referenciaTronco.position.x;
+            float y = esferaMano.position.y + offsetY;
+            float z = referenciaTronco.position.z + offsetZ;
+
+            esferaSoloEjeY.position = new Vector3(x, y, z);
+        }
+    }
+}

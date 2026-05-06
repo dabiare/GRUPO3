@@ -1,0 +1,95 @@
+using UnityEngine;
+using KinectUnityAddons; 
+
+public class BrazosMagicMirror : MonoBehaviour
+{
+    [Header("Referencias de las Líneas")]
+    public LineRenderer brazoIzquierdo;
+    public LineRenderer brazoDerecho;
+
+    [Header("Configuración")]
+    public bool indicacionActiva = true; // Lo dejamos en true por defecto para que funcione al darle Play
+    
+    // La cámara es crucial para asegurar que la línea se dibuje POR DELANTE del video
+    public Camera camaraPrincipal; 
+    public float profundidadZ = 2f; // Distancia fija frente a la cámara
+
+    private ulong userId = 0;
+
+    void Start()
+    {
+        // Si no asignas una cámara en el inspector, buscará la principal automáticamente
+        if (camaraPrincipal == null)
+        {
+            camaraPrincipal = Camera.main;
+        }
+    }
+
+    void Update()
+    {
+        if (!indicacionActiva) return;
+
+        KinectManager kinectManager = KinectManager.Instance;
+        if (kinectManager == null || !kinectManager.IsInitialized()) return;
+
+        // Obtener el ID del usuario en CADA frame (corrige el error si la persona sale y vuelve a entrar)
+        userId = kinectManager.GetPrimaryUserID();
+        if (userId == 0) 
+        {
+            // Ocultar líneas si no hay nadie
+            brazoIzquierdo.enabled = false;
+            brazoDerecho.enabled = false;
+            return;
+        }
+
+        if (kinectManager.IsUserTracked(userId))
+        {
+            // Dibujamos ambos brazos pasando los 3 puntos (Hombro -> Codo -> Mano)
+            DibujarBrazo(brazoIzquierdo, KinectInterop.JointType.ShoulderLeft, KinectInterop.JointType.ElbowLeft, KinectInterop.JointType.HandLeft, kinectManager);
+            DibujarBrazo(brazoDerecho, KinectInterop.JointType.ShoulderRight, KinectInterop.JointType.ElbowRight, KinectInterop.JointType.HandRight, kinectManager);
+        }
+    }
+
+    void DibujarBrazo(LineRenderer linea, KinectInterop.JointType hombro, KinectInterop.JointType codo, KinectInterop.JointType mano, KinectManager kinect)
+    {
+        // 1. Obtener las coordenadas 3D de Kinect
+        Vector3 posHombro = kinect.GetJointPosition(userId, (int)hombro);
+        Vector3 posCodo = kinect.GetJointPosition(userId, (int)codo);
+        Vector3 posMano = kinect.GetJointPosition(userId, (int)mano);
+
+        // 2. Si las coordenadas son cero, Kinect perdió el rastreo de ese brazo
+        if (posHombro == Vector3.zero || posMano == Vector3.zero)
+        {
+            linea.enabled = false;
+            return;
+        }
+
+        // 3. Ajuste de Profundidad (Z-Fix)
+        // Esto evita que las líneas se escondan detrás del panel de video de la cámara
+        if (camaraPrincipal != null)
+        {
+            posHombro.z = profundidadZ;
+            posCodo.z = profundidadZ;
+            posMano.z = profundidadZ;
+        }
+
+        // 4. Dibujar la línea con 3 puntos para que se doble en el codo
+        linea.enabled = true;
+        linea.positionCount = 3;
+        linea.SetPosition(0, posHombro);
+        linea.SetPosition(1, posCodo);
+        linea.SetPosition(2, posMano);
+    }
+    
+    public void ActivarIndicacion()
+    {
+        indicacionActiva = true;
+    }
+
+    public void DesactivarIndicacion()
+    {
+        indicacionActiva = false;
+        brazoIzquierdo.enabled = false;
+        brazoDerecho.enabled = false;
+    }
+}

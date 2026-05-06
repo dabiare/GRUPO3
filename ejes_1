@@ -1,0 +1,85 @@
+using UnityEngine;
+
+public class HandIzquierdo : MonoBehaviour
+{
+    [Header("Referencias principales")]
+    public Transform HandColliderLeft;  // Referencia a la mano izquierda
+    public Transform Tegumentary_System_OneMaterial_Riggedigged;  // Referencia al cuerpo/modelo
+
+    [Header("Esferas")]
+    public Transform esferaSoloEjeY;  // Esfera que se mueve solo en Y
+    public Transform esferaMano;  // Esfera que sigue la mano
+
+    [Header("Cámara / Profundidad")]
+    public Camera camaraPrincipal;  // Cámara principal
+    public float offsetFrenteCamara = 0.15f;  // Desplazamiento hacia la cámara para evitar que el objeto quede oculto
+
+    void Start()
+    {
+        if (camaraPrincipal == null)
+        {
+            camaraPrincipal = Camera.main;
+        }
+    }
+
+    void LateUpdate()
+    {
+        // Verifica si HandColliderLeft y Tegumentary_System_OneMaterial_Riggedigged no son null
+        if (HandColliderLeft == null || Tegumentary_System_OneMaterial_Riggedigged == null)
+        {
+            return;  // Si no están asignados, no hace nada
+        }
+
+        // ================================
+        // 1. ESFERA QUE SOLO SE MUEVE EN Y
+        // ================================
+        if (esferaSoloEjeY != null)
+        {
+            // Obtener las coordenadas X y Z del cuerpo
+            float positionX = Tegumentary_System_OneMaterial_Riggedigged.position.x;
+            float positionZ = Tegumentary_System_OneMaterial_Riggedigged.position.z;
+
+            // Obtener solo la coordenada Y de la mano
+            float positionY = HandColliderLeft.position.y;
+
+            // Establecer la nueva posición solo con Y modificada
+            Vector3 posicionSoloY = new Vector3(positionX, positionY, positionZ);
+
+            // Moverla ligeramente hacia la cámara para que no quede oculta
+            posicionSoloY = MoverHaciaCamara(posicionSoloY);
+
+            // Actualizar la posición de la esfera en el eje Y
+            esferaSoloEjeY.position = posicionSoloY;
+        }
+
+        // ================================
+        // 2. ESFERA QUE SIGUE A LA MANO
+        // ================================
+        if (esferaMano != null)
+        {
+            // Obtener la posición de la mano (X, Y, Z)
+            Vector3 posicionMano = HandColliderLeft.position;
+
+            // Moverla ligeramente hacia la cámara para que no quede oculta
+            posicionMano = MoverHaciaCamara(posicionMano);
+
+            // Actualizar la posición de la esfera de la mano
+            esferaMano.position = posicionMano;
+        }
+    }
+
+    // Función para mover el objeto ligeramente hacia la cámara para evitar que se quede detrás del cuerpo
+    Vector3 MoverHaciaCamara(Vector3 posicionOriginal)
+    {
+        if (camaraPrincipal == null)
+        {
+            return posicionOriginal;
+        }
+
+        // Obtener la dirección desde la cámara hacia el objeto
+        Vector3 direccionDesdeCamara = (posicionOriginal - camaraPrincipal.transform.position).normalized;
+
+        // Mover el objeto ligeramente hacia la cámara en base al offset
+        return posicionOriginal - direccionDesdeCamara * offsetFrenteCamara;
+    }
+}

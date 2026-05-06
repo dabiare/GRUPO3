@@ -1,0 +1,19 @@
+using UnityEngine;
+
+public class EnviarPosicion : MonoBehaviour
+{
+    [Header("Referencias")]
+    public Transform esferaMano;  // La esfera que sigue la mano
+    public Transform esferaSoloEjeY;  // La esfera que se mueve solo en Y
+
+    void Update()
+    {
+        if (esferaMano != null && esferaSoloEjeY != null)
+        {
+            // Enviar la posición de la esfera de la mano a la esfera en el eje Y
+            // Solo usamos la coordenada Y de la mano, pero mantenemos X y Z de la esferaSoloEjeY
+            Vector3 nuevaPosicion = esferaMano.position;  // Obtenemos la posición de la esfera de la mano
+            esferaSoloEjeY.position = new Vector3(esferaSoloEjeY.position.x, nuevaPosicion.y, esferaSoloEjeY.position.z);  // Asignamos la posición a la esfera en el eje Y
+        }
+    }
+}

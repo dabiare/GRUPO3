@@ -1,0 +1,74 @@
+using UnityEngine;
+
+public class HandIzquierdo : MonoBehaviour
+{
+    [Header("Referencias principales")]
+    public Transform HandColliderLeft;
+    public Transform Tegumentary_System_OneMaterial_Riggedigged;
+
+    [Header("Esferas")]
+    public Transform esferaSoloEjeY;
+    public Transform esferaMano;
+
+    [Header("Cámara / Profundidad")]
+    public Camera camaraPrincipal;
+    public float offsetFrenteCamara = 0.15f;
+
+    void Start()
+    {
+        if (camaraPrincipal == null)
+        {
+            camaraPrincipal = Camera.main;
+        }
+    }
+
+    void LateUpdate()
+    {
+        if (HandColliderLeft == null || Tegumentary_System_OneMaterial_Riggedigged == null)
+        {
+            return;
+        }
+
+        // ================================
+        // 1. ESFERA QUE SOLO SE MUEVE EN Y
+        // ================================
+        if (esferaSoloEjeY != null)
+        {
+            float positionX = Tegumentary_System_OneMaterial_Riggedigged.position.x;
+            float positionY = HandColliderLeft.position.y;
+            float positionZ = Tegumentary_System_OneMaterial_Riggedigged.position.z;
+
+            Vector3 posicionSoloY = new Vector3(positionX, positionY, positionZ);
+
+            // La adelanta un poco hacia la cámara para que se vea encima del cuerpo
+            posicionSoloY = MoverHaciaCamara(posicionSoloY);
+
+            esferaSoloEjeY.position = posicionSoloY;
+        }
+
+        // ================================
+        // 2. ESFERA QUE SIGUE A LA MANO
+        // ================================
+        if (esferaMano != null)
+        {
+            Vector3 posicionMano = HandColliderLeft.position;
+
+            // La adelanta un poco hacia la cámara para que no se oculte detrás del cuerpo
+            posicionMano = MoverHaciaCamara(posicionMano);
+
+            esferaMano.position = posicionMano;
+        }
+    }
+
+    Vector3 MoverHaciaCamara(Vector3 posicionOriginal)
+    {
+        if (camaraPrincipal == null)
+        {
+            return posicionOriginal;
+        }
+
+        Vector3 direccionDesdeCamara = (posicionOriginal - camaraPrincipal.transform.position).normalized;
+
+        return posicionOriginal - direccionDesdeCamara * offsetFrenteCamara;
+    }
+}

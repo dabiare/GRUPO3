@@ -1,0 +1,45 @@
+using UnityEngine;
+
+public class HandIzquierdo : MonoBehaviour
+{
+    [Header("Referencias")]
+    public Transform HandColliderLeft;
+    public Transform Tegumentary_System_OneMaterial_Riggedigged;
+    public Camera camaraPrincipal;
+
+    [Header("Profundidad")]
+    public float offsetFrenteCamara = 0.15f;
+
+    private Vector3 posicionActual;
+
+    void Start()
+    {
+        if (camaraPrincipal == null)
+        {
+            camaraPrincipal = Camera.main;
+        }
+    }
+
+    void LateUpdate()
+    {
+        if (HandColliderLeft == null || Tegumentary_System_OneMaterial_Riggedigged == null)
+        {
+            return;
+        }
+
+        float positionY = HandColliderLeft.position.y;
+        float positionX = Tegumentary_System_OneMaterial_Riggedigged.position.x;
+        float positionZ = Tegumentary_System_OneMaterial_Riggedigged.position.z;
+
+        posicionActual = new Vector3(positionX, positionY, positionZ);
+
+        // Mueve el objeto un poco hacia la cámara para que se vea encima del cuerpo
+        if (camaraPrincipal != null)
+        {
+            Vector3 direccionDesdeCamara = (posicionActual - camaraPrincipal.transform.position).normalized;
+            posicionActual = posicionActual - direccionDesdeCamara * offsetFrenteCamara;
+        }
+
+        transform.position = posicionActual;
+    }
+}

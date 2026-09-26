@@ -1,0 +1,363 @@
+using System.Collections.Generic;
+using UnityEngine;
+using com.rfilkov.kinect;
+using com.rfilkov.components;
+
+public class PelotaSigueManoEnSkeleton5 : MonoBehaviour
+{
+   [Header("La esfera que se va a mover (controlada por la mano)")]
+    public Transform esfera;
+
+    [Header("El SkeletonOverlayer que ya tenes en la escena")]
+    public SkeletonOverlayer skeleton;
+
+    [Header("Cadena VERTICAL (torso + cabeza): Pelvis -> ... -> Neck -> Head -> Nose")]
+    public KinectInterop.JointType jointTroncoBase = KinectInterop.JointType.Pelvis;
+    public KinectInterop.JointType jointCabeza = KinectInterop.JointType.Nose;
+
+    [Header("Punto de BIFURCACION (donde el brazo se separa del tronco)")]
+    public KinectInterop.JointType jointFork = KinectInterop.JointType.Neck;
+
+    [Header("Cadena del BRAZO REAL (el que controla la esfera, ej. derecho)")]
+    public KinectInterop.JointType jointClavicula = KinectInterop.JointType.ClavicleRight;
+    public KinectInterop.JointType jointHombro = KinectInterop.JointType.ShoulderRight;
+    public KinectInterop.JointType jointMano = KinectInterop.JointType.HandRight;
+
+    [Header("NUEVO: Esfera ESPEJO (brazo opuesto, ej. izquierdo) - se crea automaticamente")]
+    public bool usarEsferaEspejo = true;
+    public KinectInterop.JointType jointClaviculaEspejo = KinectInterop.JointType.ClavicleLeft;
+    public KinectInterop.JointType jointHombroEspejo = KinectInterop.JointType.ShoulderLeft;
+    public KinectInterop.JointType jointManoEspejo = KinectInterop.JointType.HandLeft;
+    public Color colorEsferaEspejo = new Color(0.4f, 0.6f, 1f); // azulado, solo para distinguirla visualmente
+
+    [Header("Punto opcional para fijar la ALTURA inicial (ej. el AR_Window actual)")]
+    public Transform puntoInicio;
+
+    [Header("Criterio 1: EXTENSION del codo (0 = doblado, 1 = totalmente estirado)")]
+    public float umbralExtensionInicio = 0.6f;
+    public float umbralExtensionFin = 0.85f;
+
+    [Header("Criterio 2: alcance LATERAL, como FRACCION del largo del brazo (0 a 1)")]
+    public float umbralAlcanceInicio = 0.55f;
+    public float umbralAlcanceFin = 0.80f;
+
+    [Header("Filtro de ruido sobre las señales crudas")]
+    public float velocidadFiltroRuido = 5f;
+
+    [Header("Suavizado del cambio de modo (torso/cabeza <-> brazo)")]
+    public float velocidadCambioModo = 3f;
+
+    [Header("Velocidad constante (metros por segundo a lo largo de cada camino)")]
+    public float velocidadSuavizado = 0.8f;
+
+    [Header("Tolerancia a perdida de tracking por joint (segundos)")]
+    public float tiempoToleranciaTracking = 0.4f;
+
+    [Header("Depuracion")]
+    public bool mostrarLogs = true;
+
+    private KinectManager kinect;
+
+    private List<int> cadenaVertical = null;
+    private List<int> cadenaBrazoReal = null;
+    private List<int> cadenaBrazoSintetico = null;
+
+    private List<int> cadenaBrazoRealEspejo = null;
+    private List<int> cadenaBrazoSinteticoEspejo = null;
+    private GameObject esferaEspejoObj = null;
+
+    private Dictionary<int, Vector3> ultimaPosValida = new Dictionary<int, Vector3>();
+    private Dictionary<int, float> ultimoTiempoValido = new Dictionary<int, float>();
+
+    private float distanciaVerticalActual = 0f;
+    private float distanciaBrazoActual = 0f;
+    private bool distanciasInicializadas = false;
+
+    private float mezclaBrazoSuavizado = 0f;
+
+    private float extensionBrazoFiltrada = 0f;
+    private float alcanceLateralFiltrado = 0f;
+    private bool filtrosInicializados = false;
+
+    private float proximoLog = 0f;
+
+    void Start()
+    {
+        if (esfera == null)
+            Debug.LogError("[PelotaSigueManoEnSkeleton3] Falta asignar 'Esfera' en el Inspector.");
+        if (skeleton == null)
+            Debug.LogError("[PelotaSigueManoEnSkeleton3] Falta asignar 'Skeleton' en el Inspector.");
+
+        if (usarEsferaEspejo && esfera != null)
+        {
+            esferaEspejoObj = Instantiate(esfera.gameObject, esfera.parent);
+            esferaEspejoObj.name = "EsferaEspejo";
+
+            // pintar distinto para diferenciarla visualmente de la esfera real (opcional, solo cosmetico)
+            Renderer rend = esferaEspejoObj.GetComponent<Renderer>();
+            if (rend != null)
+                rend.material.color = colorEsferaEspejo;
+
+            esferaEspejoObj.SetActive(false);
+        }
+    }
+
+    void LateUpdate()
+    {
+        if (esfera == null || skeleton == null)
+            return;
+
+        kinect = KinectManager.Instance;
+        if (kinect == null || !kinect.IsInitialized())
+            return;
+
+        if (cadenaVertical == null)
+        {
+            cadenaVertical = ArmarCadena(jointCabeza, jointTroncoBase);
+            cadenaBrazoReal = ArmarCadena(jointMano, jointClavicula);
+
+            cadenaBrazoSintetico = new List<int> { (int)jointFork };
+            cadenaBrazoSintetico.AddRange(cadenaBrazoReal);
+
+            if (usarEsferaEspejo)
+            {
+                cadenaBrazoRealEspejo = ArmarCadena(jointManoEspejo, jointClaviculaEspejo);
+                cadenaBrazoSinteticoEspejo = new List<int> { (int)jointFork };
+                cadenaBrazoSinteticoEspejo.AddRange(cadenaBrazoRealEspejo);
+            }
+
+            if (mostrarLogs)
+            {
+                Debug.Log("[PelotaSigueManoEnSkeleton3] Cadena vertical: " + NombresDe(cadenaVertical));
+                Debug.Log("[PelotaSigueManoEnSkeleton3] Cadena brazo (real): " + NombresDe(cadenaBrazoSintetico));
+                if (usarEsferaEspejo)
+                    Debug.Log("[PelotaSigueManoEnSkeleton3] Cadena brazo (espejo): " + NombresDe(cadenaBrazoSinteticoEspejo));
+            }
+        }
+
+        List<Vector3> puntosVertical = LeerPosicionesConTolerancia(cadenaVertical, "vertical");
+        if (puntosVertical == null) return;
+
+        List<Vector3> puntosBrazoSintetico = LeerPosicionesConTolerancia(cadenaBrazoSintetico, "brazo-real");
+        if (puntosBrazoSintetico == null) return;
+
+        List<Vector3> puntosBrazoReal = puntosBrazoSintetico.GetRange(1, puntosBrazoSintetico.Count - 1);
+        Vector3 posHombro = puntosBrazoReal[0];
+        Vector3 posMano = puntosBrazoReal[puntosBrazoReal.Count - 1];
+        Vector3 posNeck = puntosBrazoSintetico[0];
+
+        float largoBrazoCriterio = LargoDeCadena(puntosBrazoReal);
+        float largoVertical = LargoDeCadena(puntosVertical);
+        float largoBrazoSintetico = LargoDeCadena(puntosBrazoSintetico);
+
+        // ---- Criterio de modo: igual al de la version estable ----
+        float distanciaHombroMano = Vector3.Distance(posHombro, posMano);
+        float extensionBrazoCruda = largoBrazoCriterio > 0.0001f ? Mathf.Clamp01(distanciaHombroMano / largoBrazoCriterio) : 0f;
+
+        float alcanceLateral = Mathf.Abs(posMano.x - posHombro.x);
+        float alcanceLateralCrudo = largoBrazoCriterio > 0.0001f ? Mathf.Clamp01(alcanceLateral / largoBrazoCriterio) : 0f;
+
+        if (!filtrosInicializados)
+        {
+            extensionBrazoFiltrada = extensionBrazoCruda;
+            alcanceLateralFiltrado = alcanceLateralCrudo;
+            filtrosInicializados = true;
+        }
+        else
+        {
+            float alfa = 1f - Mathf.Exp(-velocidadFiltroRuido * Time.deltaTime);
+            extensionBrazoFiltrada = Mathf.Lerp(extensionBrazoFiltrada, extensionBrazoCruda, alfa);
+            alcanceLateralFiltrado = Mathf.Lerp(alcanceLateralFiltrado, alcanceLateralCrudo, alfa);
+        }
+
+        float mezclaPorExtension = Mathf.Clamp01(Mathf.InverseLerp(umbralExtensionInicio, umbralExtensionFin, extensionBrazoFiltrada));
+        float mezclaPorAlcance = Mathf.Clamp01(Mathf.InverseLerp(umbralAlcanceInicio, umbralAlcanceFin, alcanceLateralFiltrado));
+
+        float mezclaBrazoObjetivo = mezclaPorExtension * mezclaPorAlcance;
+        mezclaBrazoSuavizado = Mathf.MoveTowards(mezclaBrazoSuavizado, mezclaBrazoObjetivo, Time.deltaTime * velocidadCambioModo);
+        // ---- fin del criterio de modo ----
+
+        float distanciaVerticalObjetivo = DistanciaEnTorsoPorAltura(puntosVertical, posMano.y);
+        float distanciaBrazoObjetivo = Mathf.Clamp(Vector3.Distance(posNeck, posMano), 0f, largoBrazoSintetico);
+
+        if (!distanciasInicializadas)
+        {
+            distanciaVerticalActual = puntoInicio != null
+                ? DistanciaEnTorsoPorAltura(puntosVertical, puntoInicio.position.y)
+                : distanciaVerticalObjetivo;
+            distanciaBrazoActual = distanciaBrazoObjetivo;
+            distanciasInicializadas = true;
+        }
+
+        distanciaVerticalActual = Mathf.MoveTowards(distanciaVerticalActual, distanciaVerticalObjetivo, velocidadSuavizado * Time.deltaTime);
+        distanciaBrazoActual = Mathf.MoveTowards(distanciaBrazoActual, distanciaBrazoObjetivo, velocidadSuavizado * Time.deltaTime);
+
+        Vector3 posVertical3D = PosicionEnCadenaPorDistancia(puntosVertical, distanciaVerticalActual);
+        Vector3 posBrazo3D = PosicionEnCadenaPorDistancia(puntosBrazoSintetico, distanciaBrazoActual);
+
+        esfera.position = Vector3.Lerp(posVertical3D, posBrazo3D, mezclaBrazoSuavizado);
+
+        // ---- ESFERA ESPEJO: aparece solo mientras estamos (parcial o totalmente) en modo brazo ----
+        if (usarEsferaEspejo && esferaEspejoObj != null)
+        {
+            bool enModoBrazo = mezclaBrazoSuavizado > 0.01f;
+            esferaEspejoObj.SetActive(enModoBrazo);
+
+            if (enModoBrazo)
+            {
+                List<Vector3> puntosBrazoEspejo = LeerPosicionesConTolerancia(cadenaBrazoSinteticoEspejo, "brazo-espejo");
+
+                if (puntosBrazoEspejo != null)
+                {
+                    // MISMA distancia acumulada que la esfera real, aplicada al camino espejo
+                    Vector3 posBrazoEspejo3D = PosicionEnCadenaPorDistancia(puntosBrazoEspejo, distanciaBrazoActual);
+                    esferaEspejoObj.transform.position = Vector3.Lerp(posVertical3D, posBrazoEspejo3D, mezclaBrazoSuavizado);
+                }
+            }
+        }
+
+        if (mostrarLogs && Time.time >= proximoLog)
+        {
+            Debug.Log($"[PelotaSigueManoEnSkeleton3] extFILT: {extensionBrazoFiltrada:F2} alcFILT: {alcanceLateralFiltrado:F2} | " +
+                      $"mezclaBrazo: {mezclaBrazoSuavizado:F2} | distVertical: {distanciaVerticalActual:F3}/{largoVertical:F3} | " +
+                      $"distBrazo: {distanciaBrazoActual:F3}/{largoBrazoSintetico:F3}");
+            proximoLog = Time.time + 1f;
+        }
+    }
+
+    private List<Vector3> LeerPosicionesConTolerancia(List<int> cadena, string nombreCadena)
+    {
+        List<Vector3> puntos = new List<Vector3>(cadena.Count);
+
+        foreach (int j in cadena)
+        {
+            Vector3 pos = skeleton.GetJointWorldPosition(j);
+
+            if (pos != Vector3.zero)
+            {
+                ultimaPosValida[j] = pos;
+                ultimoTiempoValido[j] = Time.time;
+                puntos.Add(pos);
+            }
+            else
+            {
+                bool hayCache = ultimaPosValida.TryGetValue(j, out Vector3 posCache);
+                bool tiempoValido = hayCache && (Time.time - ultimoTiempoValido[j]) <= tiempoToleranciaTracking;
+
+                if (tiempoValido)
+                {
+                    puntos.Add(posCache);
+                }
+                else
+                {
+                    if (mostrarLogs && Time.time >= proximoLog)
+                    {
+                        Debug.Log($"[PelotaSigueManoEnSkeleton3] Sin tracking en '{(KinectInterop.JointType)j}' " +
+                                  $"(cadena {nombreCadena}), sin cache reciente, congelada.");
+                        proximoLog = Time.time + 1f;
+                    }
+                    return null;
+                }
+            }
+        }
+
+        return puntos;
+    }
+
+    private float DistanciaEnTorsoPorAltura(List<Vector3> puntos, float alturaObjetivo)
+    {
+        float distanciaAcumulada = 0f;
+
+        for (int i = 0; i < puntos.Count - 1; i++)
+        {
+            Vector3 a = puntos[i];
+            Vector3 b = puntos[i + 1];
+            float largoSegmento = Vector3.Distance(a, b);
+
+            float yMin = Mathf.Min(a.y, b.y);
+            float yMax = Mathf.Max(a.y, b.y);
+
+            if (alturaObjetivo >= yMin && alturaObjetivo <= yMax)
+            {
+                float t = Mathf.Abs(b.y - a.y) > 0.0001f
+                    ? Mathf.InverseLerp(a.y, b.y, alturaObjetivo)
+                    : 0f;
+                return distanciaAcumulada + t * largoSegmento;
+            }
+
+            distanciaAcumulada += largoSegmento;
+        }
+
+        float largoTotal = LargoDeCadena(puntos);
+        return alturaObjetivo < puntos[0].y ? 0f : largoTotal;
+    }
+
+    private List<int> ArmarCadena(KinectInterop.JointType jointFinal, KinectInterop.JointType jointInicio)
+    {
+        List<int> cadena = new List<int>();
+        KinectInterop.JointType actual = jointFinal;
+        int seguridad = 0;
+
+        while (seguridad < 40)
+        {
+            cadena.Add((int)actual);
+
+            if (actual == jointInicio)
+                break;
+
+            KinectInterop.JointType padre = kinect.GetParentJoint(actual);
+            if (padre == actual)
+                break;
+
+            actual = padre;
+            seguridad++;
+        }
+
+        cadena.Reverse();
+        return cadena;
+    }
+
+    private float LargoDeCadena(List<Vector3> puntos)
+    {
+        float largo = 0f;
+        for (int i = 0; i < puntos.Count - 1; i++)
+            largo += Vector3.Distance(puntos[i], puntos[i + 1]);
+        return largo;
+    }
+
+    private Vector3 PosicionEnCadenaPorDistancia(List<Vector3> puntos, float distanciaObjetivo)
+    {
+        if (puntos.Count < 2)
+            return puntos[0];
+
+        float largoTotal = LargoDeCadena(puntos);
+        distanciaObjetivo = Mathf.Clamp(distanciaObjetivo, 0f, largoTotal);
+
+        float distanciaAcumulada = 0f;
+
+        for (int i = 0; i < puntos.Count - 1; i++)
+        {
+            Vector3 puntoA = puntos[i];
+            Vector3 puntoB = puntos[i + 1];
+            float largoSegmento = Vector3.Distance(puntoA, puntoB);
+
+            if (distanciaAcumulada + largoSegmento >= distanciaObjetivo)
+            {
+                float tSegmento = largoSegmento > 0.0001f
+                    ? (distanciaObjetivo - distanciaAcumulada) / largoSegmento
+                    : 0f;
+                return Vector3.Lerp(puntoA, puntoB, tSegmento);
+            }
+
+            distanciaAcumulada += largoSegmento;
+        }
+
+        return puntos[puntos.Count - 1];
+    }
+
+    private string NombresDe(List<int> cadena)
+    {
+        List<string> nombres = cadena.ConvertAll(j => ((KinectInterop.JointType)j).ToString());
+        return string.Join(" -> ", nombres);
+    }
+}
